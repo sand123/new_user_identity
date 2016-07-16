@@ -1,13 +1,13 @@
 <?php
 /**
- * New user identity
+ * New user identity MOD
  *
  * Populates a new user's default identity from LDAP on their first visit.
  *
  * This plugin requires that a working public_ldap directory be configured.
  *
  * @version @package_version@
- * @author Kris Steinhoff
+ * @author seregin@soho-service.ru
  * @license GNU GPLv3+
  */
 class new_user_identity extends rcube_plugin
@@ -21,7 +21,7 @@ class new_user_identity extends rcube_plugin
 
     function init(){
         $this->rc = rcmail::get_instance();
-        $this->log_file = 'new_user_identity_debug.log';
+        $this->log_file = null; //new_user_identity_debug.log;
 
         $this->add_hook('user_create', array($this, 'lookup_ldap_email'));
     }
