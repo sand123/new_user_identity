@@ -18,32 +18,47 @@ class new_user_identity extends rcube_plugin
     private $ldap;
     private $ldap_config;
     private $log_file;
+    private $is_data_ready;
+    private $attr_username;
+    private $attr_email;
+    private $attr_dn;
 
-    function init(){
+    public function init(){
         $this->rc = rcmail::get_instance();
-        $this->log_file = null; //new_user_identity_debug.log;
+        $this->log_file = null; //"new_user_identity_debug.log";
 
-        $this->add_hook('user_create', array($this, 'lookup_ldap_email'));
+        $this->is_data_ready = false;
+        $this->attr_dn = "";
+        $this->attr_email ="";
+        $this->attr_username="";
+
+        $this->add_hook('user_create', array($this, 'on_user_create'));
+        $this->add_hook('identity_create', array($this, 'on_identity_create'));
     }
 
-    function lookup_ldap_email($args){
-        $this->write_log("hooked user_create args", $args);
-        $user=array();
-        if ($this->search_user(idn_to_utf8($args['user']), $user)) {
-            $this->write_log("found successfully");
-            
-            $args['user_name']  = $user['username'];
-            $args['user_email'] = '';
-
-            if(isset($user['email']) && strpos($user['email'], '@')){
-                $args['user_email'] = $user['email'];
-            }
+    public function on_user_create($params){
+        $this->write_log("hooked user_create", $params);
+        $this->attr_username = strtolower(idn_to_utf8($params['user']));
+        if(!$this->is_data_ready) $this->load_ldap_data();
+        if ($this->is_data_ready) {
+            $params['user_name']  = $this->attr_username;
+            $params['user_email'] = $this->attr_email;
         }
 
-        return $args;
+        return $params;
+    }
+
+    public function on_identity_create($params){
+        $this->write_log("hooked identity_create", $params);
+        if(!$this->is_data_ready) $this->load_ldap_data();
+        if(isset($params['login']) && $params['login']===true){
+            $this->write_log("identity creation on login, dn pushed to " . $this->attr_dn);
+            $params['record']['name'] = $this->attr_dn;
+        }
+        return $params;
     }
     
-    private function search_user($username, &$data){
+    private function load_ldap_data(){
         $this->load_config();
         if (!$this->ldap) {
             $this->ldap_config = array_merge(array(), (array)$this->rc->config->get('ldap_public')[$this->rc->config->get('new_user_identity_addressbook')]);
@@ -71,6 +86,7 @@ class new_user_identity extends rcube_plugin
 
             if(!$this->ldap->bind($this->ldap_config['bind_dn'], $this->ldap_config['bind_pass'])){
                 $this->write_log('bind LDAP failed');
+                $this->ldap = null;
                 return false;
             };
 
@@ -78,19 +94,23 @@ class new_user_identity extends rcube_plugin
 
         $found = $this->ldap->search(
             $this->ldap_config['base_dn'],
-            "(&(mail=*)(objectClass=user)(samAccountName=$username)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+            "(&(mail=*)(objectClass=user)(samAccountName=" . $this->attr_username . ")(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
             'sub',
-            array('distinguishedName','samAccountName','mail')
+            array('distinguishedName','samAccountName','mail','displayName')
         );
 
 
         if(FALSE === $found){
+            $this->is_data_ready = false;
             return false;
         }
 
         foreach($found->entries(true) as $dn=>$attr){
-            $data['username'] = $attr['samaacountname'];
-            $data['email'] = $attr['mail'];
+            $this->attr_username = $attr['samaacountname'];
+            $this->attr_email = $attr['mail'];
+            $this->attr_dn = $attr['displayname'];
+            $this->is_data_ready = true;
+            break;
         }
 
         return true;
